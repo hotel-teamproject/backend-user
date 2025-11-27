@@ -1,12 +1,15 @@
-// src/reservation/controller.js
+// reservation/controller.js
 const reservationService = require('./service');
-const response = require('../common/response');
 
 // 예약 생성
-exports.createReservation = async (req, res) => {
+async function create(req, res) {
   try {
     const { room, check_in, check_out, special_requests } = req.body;
-    // user 정보는 JWT 인증 미들웨어 후 req.user.id로 할당
+
+    if (!room || !check_in || !check_out) {
+      return res.status(400).json({ message: '객실, 체크인, 체크아웃은 필수입니다.' });
+    }
+
     const reservation = await reservationService.createReservation({
       user: req.user.id,
       room,
@@ -14,52 +17,60 @@ exports.createReservation = async (req, res) => {
       check_out,
       special_requests,
     });
-    return response.success(res, reservation, "예약이 성공적으로 등록되었습니다.", 201);
+
+    return res.status(201).json({ reservation });
   } catch (err) {
-    return response.error(res, err.message, 400);
+    return res.status(400).json({ message: err.message });
   }
-};
+}
 
 // 내 예약 목록 조회
-exports.getMyReservations = async (req, res) => {
+async function getMyReservations(req, res) {
   try {
     const reservations = await reservationService.getReservationsByUser(req.user.id);
-    return response.success(res, reservations, "예약 목록 조회 성공");
+    return res.status(200).json({ reservations });
   } catch (err) {
-    return response.error(res, err.message, 400);
+    return res.status(400).json({ message: err.message });
   }
-};
+}
 
 // 예약 상세 조회
-exports.getReservationDetail = async (req, res) => {
+async function getOne(req, res) {
   try {
-    const { reservationId } = req.params;
-    const reservation = await reservationService.getReservationById(reservationId);
-    if (!reservation) return response.error(res, "예약 정보를 찾을 수 없습니다.", 404);
-    return response.success(res, reservation, "예약 상세 조회 성공");
+    const reservation = await reservationService.getReservationById(req.params.id);
+    if (!reservation) {
+      return res.status(404).json({ message: '예약 정보를 찾을 수 없습니다.' });
+    }
+    return res.status(200).json({ reservation });
   } catch (err) {
-    return response.error(res, err.message, 400);
+    return res.status(400).json({ message: err.message });
   }
-};
+}
 
 // 예약 취소
-exports.cancelReservation = async (req, res) => {
+async function cancel(req, res) {
   try {
-    const { reservationId } = req.params;
-    const reservation = await reservationService.cancelReservation(reservationId, req.user.id);
-    return response.success(res, reservation, "예약이 취소되었습니다.");
+    const reservation = await reservationService.cancelReservation(req.params.id, req.user.id);
+    return res.status(200).json({ reservation });
   } catch (err) {
-    return response.error(res, err.message, 400);
+    return res.status(400).json({ message: err.message });
   }
-};
+}
 
-// 예약 완료 (관리자/운영자 기능 예시)
-exports.completeReservation = async (req, res) => {
+// 예약 완료 (관리자/운영자용, 필요 시 권한 체크 추가)
+async function complete(req, res) {
   try {
-    const { reservationId } = req.params;
-    const reservation = await reservationService.completeReservation(reservationId);
-    return response.success(res, reservation, "숙박 완료 처리되었습니다.");
+    const reservation = await reservationService.completeReservation(req.params.id);
+    return res.status(200).json({ reservation });
   } catch (err) {
-    return response.error(res, err.message, 400);
+    return res.status(400).json({ message: err.message });
   }
+}
+
+module.exports = {
+  create,
+  getMyReservations,
+  getOne,
+  cancel,
+  complete,
 };

@@ -1,41 +1,61 @@
-// src/upload/s3.js
-const AWS = require('aws-sdk');
+// upload/s3.js
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { v4: uuidv4 } = require('uuid');
-require('dotenv').config();
+const path = require('path');
 
-// .env 파일에 아래 설정 필요
-// AWS_ACCESS_KEY_ID=...
-// AWS_SECRET_ACCESS_KEY=...
-// AWS_REGION=ap-northeast-2
-// S3_BUCKET=your-bucket-name
+const BUCKET = process.env.S3_BUCKET;
+const REGION = process.env.AWS_REGION;
 
-const s3 = new AWS.S3({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION,
+const s3 = new S3Client({
+  region: REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
 });
 
-const bucket = process.env.S3_BUCKET;
+// 서버에서 직접 업로드할 때 사용
+async function uploadToS3(file, folder = 'uploads') {
+  const ext = path.extname(file.originalname || '');
+  const key = `${folder}/${Date.now()}-${uuidv4()}${ext}`;
 
-// 파일을 S3에 업로드
-async function uploadToS3(file, dir = 'profile') {
-  const fileExt = file.originalname.split('.').pop();
-  const fileKey = `${dir}/${uuidv4()}.${fileExt}`;
-
-  const params = {
-    Bucket: bucket,
-    Key: fileKey,
+  const command = new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
     Body: file.buffer,
     ContentType: file.mimetype,
-    ACL: 'public-read', // 공개 URL 반환용
-  };
-
-  return new Promise((resolve, reject) => {
-    s3.upload(params, (err, data) => {
-      if (err) return reject(err);
-      resolve(data.Location); // 업로드된 파일의 S3 URL 반환
-    });
   });
+
+  await s3.send(command);
+
+  const url = `https://${BUCKET}.s3.${REGION}.amazonaws.com/${key}`;
+  return url;
 }
 
-module.exports = { uploadToS3 };
+// 프론트가 직접 PUT 업로드할 수 있게 presigned URL 발급
+async function presignPut(key, contentType) {
+  const command = new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+    ContentType: contentType,
+  });
+
+  const url = await getSignedUrl(s3, command, { expiresIn: 60 * 5 }); // 5분
+  return url;
+}
+
+// 객체 삭제
+async function deleteObject(key) {
+  const command = new DeleteObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+  });
+  await s3.send(command);
+}
+
+module.exports = {
+  uploadToS3,
+  presignPut,
+  deleteObject,
+};

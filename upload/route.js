@@ -1,47 +1,49 @@
-// src/upload/route.js
+// upload/route.js
 const express = require('express');
-const router = express.Router();
 const multer = require('multer');
-const upload = multer(); // 메모리 방식(이미지, 파일 버퍼)
 
+const router = express.Router();
 const authMiddleware = require('../common/authMiddleware');
-const { uploadToS3 } = require('./s3'); // v2 방식: 서버가 직접 업로드
-// v3 presign 방식: const { presignPut, presignGet, deleteObject } = require('./s3');
+const { uploadToS3, presignPut } = require('./s3');
 
-// 회원 프로필 이미지 업로드 (실제 파일)
-router.post('/profile', authMiddleware, upload.single('file'), async (req, res) => {
+// 메모리 저장소 (S3 직업로드용)
+const upload = multer({ storage: multer.memoryStorage() });
+
+// 헬스체크용
+router.get('/ping', (req, res) => {
+  return res.json({ ok: true });
+});
+
+// presigned URL 발급 (프론트에서 직접 PUT 업로드)
+router.post('/presign', authMiddleware, async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ success: false, message: '파일이 없습니다.' });
-    const imageUrl = await uploadToS3(req.file, 'profile');
-    // (옵션) 사용자 모델에 imageUrl 저장하는 로직 추가  
-    res.json({ success: true, imageUrl });
+    const { filename, contentType } = req.body;
+    if (!filename || !contentType) {
+      return res.status(400).json({ message: 'filename, contentType는 필수입니다.' });
+    }
+
+    const ext = filename.includes('.') ? filename.substring(filename.lastIndexOf('.')) : '';
+    const key = `uploads/${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
+
+    const url = await presignPut(key, contentType);
+    return res.json({ url, key });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    console.error('[presign] error:', err);
+    return res.status(500).json({ message: 'presign 생성 중 오류가 발생했습니다.' });
   }
 });
 
-// 프론트엔드 직접 S3 PUT presigned url 발급
-router.get('/profile/presign', authMiddleware, async (req, res) => {
+// 서버 경유 업로드 (선택 사항)
+router.post('/file', authMiddleware, upload.single('file'), async (req, res) => {
   try {
-    const { Key, ContentType } = req.query;
-    // presign 방식: require('./s3').presignPut
-    const { presignPut } = require('./s3');
-    const url = await presignPut(Key, ContentType);
-    res.json({ success: true, url });
+    if (!req.file) {
+      return res.status(400).json({ message: '파일이 필요합니다.' });
+    }
+    const url = await uploadToS3(req.file, 'uploads');
+    return res.status(201).json({ url });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// S3에서 파일 삭제(API)
-router.delete('/profile', authMiddleware, async (req, res) => {
-  try {
-    const { Key } = req.body;
-    const { deleteObject } = require('./s3');
-    await deleteObject(Key);
-    res.json({ success: true, message: '삭제 완료' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    console.error('[upload] error:', err);
+    return res.status(500).json({ message: '파일 업로드 중 오류가 발생했습니다.' });
   }
 });
 
